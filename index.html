@@ -32,7 +32,6 @@
     function App() {
       const [images, setImages] = React.useState([]);
       const [isProcessing, setIsProcessing] = React.useState(false);
-      const [apiKey, setApiKey] = React.useState('');
       const fileInputRef = React.useRef(null);
 
       // 處理檔案上傳
@@ -75,8 +74,9 @@
           try {
             const response = await fetch(url, options);
             if (!response.ok) {
-              const errText = await response.text();
-              throw new Error(`API 錯誤 (${response.status}): ${errText}`);
+              const errorData = await response.json().catch(() => ({}));
+              const errText = errorData?.error?.message || await response.text();
+              throw new Error(`API 錯誤: ${errText}`);
             }
             return await response.json();
           } catch (error) {
@@ -88,7 +88,12 @@
 
       // 呼叫 Gemini API 進行風格轉換
       const processSingleImage = async (imageObj) => {
-        if (!apiKey.trim()) throw new Error("請先輸入 Gemini API Key");
+        // ⚠️【重要修改說明】⚠️
+        // 程式碼目前鎖定為空字串，以供在此環境測試。
+        // 若要上傳至 GitHub Pages，您「必須」將下方的空字串替換為您自己申請的真實 API Key
+        // 範例：const apiKey = "AIzaSyAbCdEfGhIjKlMnOpQrStUvWxYz";
+        // 申請網址：https://aistudio.google.com/app/apikey
+        const apiKey = "AIzaSyDr3IROAo2zuqQ9l1i4eKzbnnFrCGXnluE"; 
 
         try {
           const base64Data = await fileToBase64(imageObj.file);
@@ -129,17 +134,12 @@
 
         } catch (error) {
           console.error("處理錯誤:", error);
-          throw error;
+          throw new Error(error.message || "轉換失敗");
         }
       };
 
       // 開始批次處理
       const startBatchProcessing = async () => {
-        if (!apiKey.trim()) {
-          alert("請先在網頁頂端輸入您的 Gemini API Key！");
-          return;
-        }
-
         setIsProcessing(true);
 
         for (let i = 0; i < images.length; i++) {
@@ -149,7 +149,7 @@
               const resultUrl = await processSingleImage(images[i]);
               setImages((prev) => prev.map((img, index) => index === i ? { ...img, status: 'done', resultBase64: resultUrl } : img));
             } catch (error) {
-              setImages((prev) => prev.map((img, index) => index === i ? { ...img, status: 'error', errorMessage: '轉換失敗' } : img));
+              setImages((prev) => prev.map((img, index) => index === i ? { ...img, status: 'error', errorMessage: error.message } : img));
             }
           }
         }
@@ -189,23 +189,6 @@
               <p className="text-gray-600 max-w-2xl mx-auto">
                 上傳照片，AI 將運用粗線條、平塗色彩與極簡五官的美學，為您生成充滿溫度的生活插畫。
               </p>
-              
-              {/* API Key 區塊 (為了 GitHub Pages 靜態網頁安全而設) */}
-              <div className="bg-white/60 p-4 rounded-xl shadow-sm inline-block w-full max-w-md border border-gray-200">
-                <label className="block text-sm font-semibold text-gray-700 mb-2 text-left">
-                  <i className="ph ph-key text-[#d17a45] mr-1"></i> Gemini API Key (必要)
-                </label>
-                <input 
-                  type="password" 
-                  value={apiKey}
-                  onChange={(e) => setApiKey(e.target.value)}
-                  placeholder="AIzaSy..." 
-                  className="w-full px-4 py-2 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-[#d17a45] bg-white"
-                />
-                <p className="text-xs text-gray-500 mt-2 text-left">
-                  您的金鑰僅會保留在當前瀏覽器中，不會上傳至任何伺服器。
-                </p>
-              </div>
             </div>
 
             {/* 上傳區塊 */}
