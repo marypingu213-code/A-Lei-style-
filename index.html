@@ -1,305 +1,334 @@
-import React, { useState, useCallback, useRef } from 'react';
-import { UploadCloud, Download, Image as ImageIcon, Loader2, CheckCircle2, AlertCircle, Play, Trash2 } from 'lucide-react';
-
-export default function App() {
-  const [images, setImages] = useState([]);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const fileInputRef = useRef(null);
-
-  // 處理檔案上傳
-  const handleFileChange = (e) => {
-    const files = Array.from(e.target.files);
-    if (files.length === 0) return;
-
-    const newImages = files.map((file) => ({
-      id: Math.random().toString(36).substring(2, 9),
-      file,
-      originalUrl: URL.createObjectURL(file),
-      status: 'pending', // pending, processing, done, error
-      resultBase64: null,
-      errorMessage: ''
-    }));
-
-    setImages((prev) => [...prev, ...newImages]);
-    // Reset input
-    if (fileInputRef.current) fileInputRef.current.value = '';
-  };
-
-  // 移除圖片
-  const removeImage = (id) => {
-    setImages((prev) => prev.filter((img) => img.id !== id));
-  };
-
-  // 讀取檔案為 Base64
-  const fileToBase64 = (file) => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result.split(',')[1]);
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
-    });
-  };
-
-  // 具備指數退避的 Fetch 函數
-  const fetchWithBackoff = async (url, options, retries = 5) => {
-    const delays = [1000, 2000, 4000, 8000, 16000];
-    for (let i = 0; i <= retries; i++) {
-      try {
-        const response = await fetch(url, options);
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        return await response.json();
-      } catch (error) {
-        if (i === retries) throw error;
-        await new Promise((res) => setTimeout(res, delays[i]));
-      }
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>阿雷 (A-Lei) 風格轉換器</title>
+  
+  <!-- 載入 React, ReactDOM, Babel (用於在瀏覽器編譯 JSX) -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  
+  <!-- 載入 Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- 載入 Phosphor Icons (圖示庫) -->
+  <script src="https://unpkg.com/@phosphor-icons/web"></script>
+  
+  <style>
+    /* 確保 spinner 動畫順暢 */
+    @keyframes spin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
     }
-  };
+    .ph-spin { animation: spin 1s linear infinite; }
+  </style>
+</head>
+<body class="bg-[#f5f1e7] text-gray-800 font-sans min-h-screen">
+  <div id="root"></div>
 
-  // 呼叫 Gemini API 進行風格轉換
-  const processSingleImage = async (imageObj) => {
-    try {
-      const base64Data = await fileToBase64(imageObj.file);
-      const mimeType = imageObj.file.type;
-      const apiKey = ""; // 執行環境會自動提供
+  <script type="text/babel">
+    function App() {
+      const [images, setImages] = React.useState([]);
+      const [isProcessing, setIsProcessing] = React.useState(false);
+      const [apiKey, setApiKey] = React.useState('');
+      const fileInputRef = React.useRef(null);
 
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image-preview:generateContent?key=${apiKey}`;
-      
-      // 針對阿雷風格的強烈提示詞
-      const prompt = `
-        Transform this photo into an illustration. Use a very specific Taiwanese indie illustration style (similar to A-Lei):
-        1. Bold Outlines: Use thick, uniform, solid black outlines for all characters and objects.
-        2. Flat Colors: Use completely flat, solid colors. ABSOLUTELY NO gradients, NO shadows, and NO realistic lighting.
-        3. Minimalist Faces: Facial features must be extremely simple: just two tiny black dots for eyes, and a simple short line or curve for the mouth. No detailed noses or detailed eyes.
-        4. Color Palette: Use a warm, slightly muted, retro earthy color palette (mustard yellow, olive green, terracotta, denim blue).
-        5. Vibe: Keep the composition of the original photo but simplify all clothing and background details into basic geometric blocks enclosed by thick black lines. Make it feel cozy, everyday, and heartwarming.
-      `;
+      // 處理檔案上傳
+      const handleFileChange = (e) => {
+        const files = Array.from(e.target.files);
+        if (files.length === 0) return;
 
-      const payload = {
-        contents: [
-          {
-            role: "user",
-            parts: [
-              { text: prompt },
-              { inlineData: { mimeType: mimeType, data: base64Data } }
-            ]
+        const newImages = files.map((file) => ({
+          id: Math.random().toString(36).substring(2, 9),
+          file,
+          originalUrl: URL.createObjectURL(file),
+          status: 'pending', // pending, processing, done, error
+          resultBase64: null,
+          errorMessage: ''
+        }));
+
+        setImages((prev) => [...prev, ...newImages]);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+      };
+
+      // 移除圖片
+      const removeImage = (id) => {
+        setImages((prev) => prev.filter((img) => img.id !== id));
+      };
+
+      // 讀取檔案為 Base64
+      const fileToBase64 = (file) => {
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result.split(',')[1]);
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+      };
+
+      // 具備指數退避的 Fetch 函數 (處理 API 請求限制)
+      const fetchWithBackoff = async (url, options, retries = 5) => {
+        const delays = [1000, 2000, 4000, 8000, 16000];
+        for (let i = 0; i <= retries; i++) {
+          try {
+            const response = await fetch(url, options);
+            if (!response.ok) {
+              const errText = await response.text();
+              throw new Error(`API 錯誤 (${response.status}): ${errText}`);
+            }
+            return await response.json();
+          } catch (error) {
+            if (i === retries) throw error;
+            await new Promise((res) => setTimeout(res, delays[i]));
           }
-        ],
-        generationConfig: {
-          responseModalities: ["IMAGE"]
         }
       };
 
-      const result = await fetchWithBackoff(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-
-      const outBase64 = result.candidates?.[0]?.content?.parts?.find(p => p.inlineData)?.inlineData?.data;
-      
-      if (!outBase64) {
-        throw new Error("API did not return image data.");
-      }
-
-      return `data:image/jpeg;base64,${outBase64}`;
-    } catch (error) {
-      console.error("Image processing error:", error);
-      throw error;
-    }
-  };
-
-  // 開始批次處理
-  const startBatchProcessing = async () => {
-    setIsProcessing(true);
-
-    for (let i = 0; i < images.length; i++) {
-      if (images[i].status === 'pending' || images[i].status === 'error') {
-        // 更新狀態為處理中
-        setImages((prev) => 
-          prev.map((img, index) => index === i ? { ...img, status: 'processing' } : img)
-        );
+      // 呼叫 Gemini API 進行風格轉換
+      const processSingleImage = async (imageObj) => {
+        if (!apiKey.trim()) throw new Error("請先輸入 Gemini API Key");
 
         try {
-          const resultUrl = await processSingleImage(images[i]);
+          const base64Data = await fileToBase64(imageObj.file);
+          const mimeType = imageObj.file.type;
+
+          const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image-preview:generateContent?key=${apiKey.trim()}`;
           
-          // 更新狀態為完成
-          setImages((prev) => 
-            prev.map((img, index) => index === i ? { ...img, status: 'done', resultBase64: resultUrl } : img)
-          );
+          const prompt = `
+            Transform this photo into an illustration. Use a very specific Taiwanese indie illustration style (similar to A-Lei):
+            1. Bold Outlines: Use thick, uniform, solid black outlines for all characters and objects.
+            2. Flat Colors: Use completely flat, solid colors. ABSOLUTELY NO gradients, NO shadows, and NO realistic lighting.
+            3. Minimalist Faces: Facial features must be extremely simple: just two tiny black dots for eyes, and a simple short line or curve for the mouth. No detailed noses or detailed eyes.
+            4. Color Palette: Use a warm, slightly muted, retro earthy color palette (mustard yellow, olive green, terracotta, denim blue).
+            5. Vibe: Keep the composition of the original photo but simplify all clothing and background details into basic geometric blocks enclosed by thick black lines. Make it feel cozy, everyday, and heartwarming.
+          `;
+
+          const payload = {
+            contents: [{
+              role: "user",
+              parts: [
+                { text: prompt },
+                { inlineData: { mimeType: mimeType, data: base64Data } }
+              ]
+            }],
+            generationConfig: { responseModalities: ["IMAGE"] }
+          };
+
+          const result = await fetchWithBackoff(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+
+          const outBase64 = result.candidates?.[0]?.content?.parts?.find(p => p.inlineData)?.inlineData?.data;
+          
+          if (!outBase64) throw new Error("API 未回傳圖片資料，請稍後再試。");
+          return `data:image/jpeg;base64,${outBase64}`;
+
         } catch (error) {
-          // 更新狀態為錯誤
-          setImages((prev) => 
-            prev.map((img, index) => index === i ? { ...img, status: 'error', errorMessage: '轉換失敗，請稍後再試' } : img)
-          );
+          console.error("處理錯誤:", error);
+          throw error;
         }
-      }
-    }
+      };
 
-    setIsProcessing(false);
-  };
+      // 開始批次處理
+      const startBatchProcessing = async () => {
+        if (!apiKey.trim()) {
+          alert("請先在網頁頂端輸入您的 Gemini API Key！");
+          return;
+        }
 
-  // 單張下載
-  const downloadImage = (url, filename) => {
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-  };
+        setIsProcessing(true);
 
-  // 批次下載所有完成的圖片
-  const downloadAll = () => {
-    const doneImages = images.filter(img => img.status === 'done');
-    doneImages.forEach((img, index) => {
-      // 稍微延遲避免瀏覽器阻擋多重下載
-      setTimeout(() => {
-        downloadImage(img.resultBase64, `alei_style_${index + 1}.jpg`);
-      }, index * 300);
-    });
-  };
+        for (let i = 0; i < images.length; i++) {
+          if (images[i].status === 'pending' || images[i].status === 'error') {
+            setImages((prev) => prev.map((img, index) => index === i ? { ...img, status: 'processing' } : img));
+            try {
+              const resultUrl = await processSingleImage(images[i]);
+              setImages((prev) => prev.map((img, index) => index === i ? { ...img, status: 'done', resultBase64: resultUrl } : img));
+            } catch (error) {
+              setImages((prev) => prev.map((img, index) => index === i ? { ...img, status: 'error', errorMessage: '轉換失敗' } : img));
+            }
+          }
+        }
+        setIsProcessing(false);
+      };
 
-  const pendingCount = images.filter(img => img.status === 'pending').length;
-  const doneCount = images.filter(img => img.status === 'done').length;
+      // 單張下載
+      const downloadImage = (url, filename) => {
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+      };
 
-  return (
-    <div className="min-h-screen bg-[#f5f1e7] text-gray-800 font-sans p-6">
-      <div className="max-w-5xl mx-auto space-y-8">
-        
-        {/* Header */}
-        <div className="text-center space-y-4">
-          <h1 className="text-4xl font-bold tracking-wider text-gray-900">
-            阿雷 (A-Lei) 風格轉換器
-          </h1>
-          <p className="text-gray-600 max-w-2xl mx-auto">
-            批次上傳您的照片，AI 將運用粗線條、平塗色彩與極簡五官的藝術風格，為您生成充滿溫度的生活插畫紀錄。
-          </p>
-        </div>
+      // 批次下載
+      const downloadAll = () => {
+        const doneImages = images.filter(img => img.status === 'done');
+        doneImages.forEach((img, index) => {
+          setTimeout(() => downloadImage(img.resultBase64, `alei_style_${index + 1}.jpg`), index * 400);
+        });
+      };
 
-        {/* Upload Area */}
-        <div 
-          className="border-4 border-dashed border-gray-300 rounded-2xl p-10 bg-white/50 hover:bg-white transition-colors cursor-pointer flex flex-col items-center justify-center text-center shadow-sm"
-          onClick={() => fileInputRef.current?.click()}
-        >
-          <UploadCloud className="w-16 h-16 text-gray-400 mb-4" />
-          <h3 className="text-xl font-semibold mb-2">點擊或拖曳照片至此</h3>
-          <p className="text-sm text-gray-500">支援 JPG, PNG 格式，可一次選擇多張檔案</p>
-          <input 
-            type="file" 
-            ref={fileInputRef} 
-            onChange={handleFileChange} 
-            multiple 
-            accept="image/jpeg, image/png, image/webp" 
-            className="hidden" 
-          />
-        </div>
+      const pendingCount = images.filter(img => img.status === 'pending').length;
+      const doneCount = images.filter(img => img.status === 'done').length;
 
-        {/* Action Bar */}
-        {images.length > 0 && (
-          <div className="flex flex-wrap items-center justify-between bg-white p-4 rounded-xl shadow-sm border border-gray-100">
-            <div className="flex space-x-4 text-sm font-medium">
-              <span className="text-gray-600">總計: {images.length} 張</span>
-              <span className="text-blue-600">等待中: {pendingCount} 張</span>
-              <span className="text-green-600">已完成: {doneCount} 張</span>
-            </div>
+      return (
+        <div className="p-6">
+          <div className="max-w-5xl mx-auto space-y-8">
             
-            <div className="flex space-x-3 mt-4 sm:mt-0">
-              <button 
-                onClick={startBatchProcessing}
-                disabled={isProcessing || pendingCount === 0}
-                className={`flex items-center px-5 py-2.5 rounded-lg font-bold transition-all ${
-                  isProcessing || pendingCount === 0 
-                    ? 'bg-gray-200 text-gray-400 cursor-not-allowed' 
-                    : 'bg-black text-white hover:bg-gray-800 shadow-md hover:shadow-lg'
-                }`}
-              >
-                {isProcessing ? (
-                  <><Loader2 className="w-5 h-5 mr-2 animate-spin" /> 處理中...</>
-                ) : (
-                  <><Play className="w-5 h-5 mr-2" /> 開始批次轉換</>
-                )}
-              </button>
-
-              {doneCount > 0 && (
-                <button 
-                  onClick={downloadAll}
-                  className="flex items-center px-5 py-2.5 rounded-lg font-bold bg-[#d17a45] text-white hover:bg-[#b86735] transition-all shadow-md hover:shadow-lg"
-                >
-                  <Download className="w-5 h-5 mr-2" /> 下載所有完成圖
-                </button>
-              )}
+            {/* 標題與設定區 */}
+            <div className="text-center space-y-6">
+              <h1 className="text-4xl font-bold tracking-wider text-gray-900 mt-8">
+                阿雷 (A-Lei) 風格轉換器
+              </h1>
+              <p className="text-gray-600 max-w-2xl mx-auto">
+                上傳照片，AI 將運用粗線條、平塗色彩與極簡五官的美學，為您生成充滿溫度的生活插畫。
+              </p>
+              
+              {/* API Key 區塊 (為了 GitHub Pages 靜態網頁安全而設) */}
+              <div className="bg-white/60 p-4 rounded-xl shadow-sm inline-block w-full max-w-md border border-gray-200">
+                <label className="block text-sm font-semibold text-gray-700 mb-2 text-left">
+                  <i className="ph ph-key text-[#d17a45] mr-1"></i> Gemini API Key (必要)
+                </label>
+                <input 
+                  type="password" 
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  placeholder="AIzaSy..." 
+                  className="w-full px-4 py-2 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-[#d17a45] bg-white"
+                />
+                <p className="text-xs text-gray-500 mt-2 text-left">
+                  您的金鑰僅會保留在當前瀏覽器中，不會上傳至任何伺服器。
+                </p>
+              </div>
             </div>
-          </div>
-        )}
 
-        {/* Image Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {images.map((img) => (
-            <div key={img.id} className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col">
-              {/* Header */}
-              <div className="px-4 py-3 border-b border-gray-100 flex justify-between items-center bg-gray-50">
-                <div className="flex items-center space-x-2">
-                  {img.status === 'pending' && <div className="flex items-center text-gray-500 text-sm"><ImageIcon className="w-4 h-4 mr-1" /> 等待中</div>}
-                  {img.status === 'processing' && <div className="flex items-center text-blue-600 text-sm font-medium"><Loader2 className="w-4 h-4 mr-1 animate-spin" /> 轉換中...</div>}
-                  {img.status === 'done' && <div className="flex items-center text-green-600 text-sm font-medium"><CheckCircle2 className="w-4 h-4 mr-1" /> 完成</div>}
-                  {img.status === 'error' && <div className="flex items-center text-red-500 text-sm font-medium"><AlertCircle className="w-4 h-4 mr-1" /> {img.errorMessage}</div>}
+            {/* 上傳區塊 */}
+            <div 
+              className="border-4 border-dashed border-gray-300 rounded-2xl p-10 bg-white/50 hover:bg-white transition-colors cursor-pointer flex flex-col items-center justify-center text-center shadow-sm"
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <i className="ph ph-cloud-arrow-up text-6xl text-gray-400 mb-4"></i>
+              <h3 className="text-xl font-semibold mb-2">點擊或拖曳照片至此</h3>
+              <p className="text-sm text-gray-500">支援 JPG, PNG，可一次選取多張</p>
+              <input 
+                type="file" ref={fileInputRef} onChange={handleFileChange} 
+                multiple accept="image/jpeg, image/png, image/webp" className="hidden" 
+              />
+            </div>
+
+            {/* 控制列 */}
+            {images.length > 0 && (
+              <div className="flex flex-wrap items-center justify-between bg-white p-4 rounded-xl shadow-sm border border-gray-100 sticky top-4 z-10">
+                <div className="flex space-x-4 text-sm font-medium mb-4 sm:mb-0">
+                  <span className="text-gray-600">總計: {images.length}</span>
+                  <span className="text-blue-600">等待中: {pendingCount}</span>
+                  <span className="text-green-600">已完成: {doneCount}</span>
                 </div>
                 
-                <button 
-                  onClick={() => removeImage(img.id)}
-                  disabled={img.status === 'processing'}
-                  className="text-gray-400 hover:text-red-500 transition-colors p-1"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              </div>
-
-              {/* Image Preview Area */}
-              <div className="p-4 flex-grow flex items-center justify-center space-x-4">
-                {/* Original */}
-                <div className="w-1/2 flex flex-col items-center">
-                  <span className="text-xs text-gray-400 mb-2 uppercase tracking-wider font-bold">Original</span>
-                  <div className="aspect-square w-full rounded-lg overflow-hidden bg-gray-100 relative">
-                    <img src={img.originalUrl} alt="Original" className="w-full h-full object-cover" />
-                  </div>
-                </div>
-
-                {/* Generated */}
-                <div className="w-1/2 flex flex-col items-center">
-                  <span className="text-xs text-[#d17a45] mb-2 uppercase tracking-wider font-bold">A-Lei Style</span>
-                  <div className="aspect-square w-full rounded-lg overflow-hidden bg-gray-50 border-2 border-dashed border-gray-200 flex items-center justify-center relative">
-                    {img.status === 'done' && img.resultBase64 ? (
-                      <img src={img.resultBase64} alt="Generated" className="w-full h-full object-cover" />
-                    ) : img.status === 'processing' ? (
-                      <div className="flex flex-col items-center text-gray-400">
-                        <Loader2 className="w-8 h-8 animate-spin mb-2" />
-                        <span className="text-sm">繪製中...</span>
-                      </div>
-                    ) : (
-                      <ImageIcon className="w-8 h-8 text-gray-200" />
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              {/* Footer / Actions */}
-              {img.status === 'done' && (
-                <div className="px-4 py-3 bg-gray-50 border-t border-gray-100 flex justify-end">
+                <div className="flex space-x-3 w-full sm:w-auto">
                   <button 
-                    onClick={() => downloadImage(img.resultBase64, `alei_style_${img.id}.jpg`)}
-                    className="flex items-center text-sm font-semibold text-[#d17a45] hover:text-[#b86735] transition-colors"
+                    onClick={startBatchProcessing}
+                    disabled={isProcessing || pendingCount === 0}
+                    className={`flex-1 sm:flex-none flex items-center justify-center px-5 py-2.5 rounded-lg font-bold transition-all ${
+                      isProcessing || pendingCount === 0 
+                        ? 'bg-gray-200 text-gray-400 cursor-not-allowed' 
+                        : 'bg-black text-white hover:bg-gray-800 shadow-md'
+                    }`}
                   >
-                    <Download className="w-4 h-4 mr-1" /> 下載單張
+                    {isProcessing ? (
+                      <><i className="ph ph-spinner ph-spin text-lg mr-2"></i> 處理中...</>
+                    ) : (
+                      <><i className="ph ph-play text-lg mr-2"></i> 開始批次轉換</>
+                    )}
                   </button>
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
 
-      </div>
-    </div>
-  );
-}
+                  {doneCount > 0 && (
+                    <button 
+                      onClick={downloadAll}
+                      className="flex-1 sm:flex-none flex items-center justify-center px-5 py-2.5 rounded-lg font-bold bg-[#d17a45] text-white hover:bg-[#b86735] transition-all shadow-md"
+                    >
+                      <i className="ph ph-download-simple text-lg mr-2"></i> 下載全部
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* 圖片網格 */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pb-12">
+              {images.map((img) => (
+                <div key={img.id} className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col">
+                  {/* 卡片標題列 */}
+                  <div className="px-4 py-3 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+                    <div className="flex items-center space-x-2 font-medium">
+                      {img.status === 'pending' && <span className="text-gray-500 text-sm flex items-center"><i className="ph ph-image mr-1"></i> 等待中</span>}
+                      {img.status === 'processing' && <span className="text-blue-600 text-sm flex items-center"><i className="ph ph-spinner ph-spin mr-1"></i> 繪製中...</span>}
+                      {img.status === 'done' && <span className="text-green-600 text-sm flex items-center"><i className="ph ph-check-circle mr-1"></i> 完成</span>}
+                      {img.status === 'error' && <span className="text-red-500 text-sm flex items-center"><i className="ph ph-warning-circle mr-1"></i> {img.errorMessage}</span>}
+                    </div>
+                    <button 
+                      onClick={() => removeImage(img.id)}
+                      disabled={img.status === 'processing'}
+                      className="text-gray-400 hover:text-red-500 transition-colors p-1"
+                      title="移除照片"
+                    >
+                      <i className="ph ph-trash text-lg"></i>
+                    </button>
+                  </div>
+
+                  {/* 圖片預覽區 */}
+                  <div className="p-4 flex-grow flex items-center justify-center space-x-4">
+                    <div className="w-1/2 flex flex-col items-center">
+                      <span className="text-xs text-gray-400 mb-2 uppercase tracking-wider font-bold">原圖</span>
+                      <div className="aspect-square w-full rounded-lg overflow-hidden bg-gray-100 relative shadow-inner">
+                        <img src={img.originalUrl} className="w-full h-full object-cover" alt="Original" />
+                      </div>
+                    </div>
+
+                    <div className="w-1/2 flex flex-col items-center">
+                      <span className="text-xs text-[#d17a45] mb-2 uppercase tracking-wider font-bold">阿雷風格</span>
+                      <div className="aspect-square w-full rounded-lg overflow-hidden bg-gray-50 border-2 border-dashed border-gray-200 flex items-center justify-center relative shadow-inner">
+                        {img.status === 'done' && img.resultBase64 ? (
+                          <img src={img.resultBase64} className="w-full h-full object-cover" alt="Generated" />
+                        ) : img.status === 'processing' ? (
+                          <div className="flex flex-col items-center text-gray-400">
+                            <i className="ph ph-spinner ph-spin text-3xl mb-2"></i>
+                          </div>
+                        ) : (
+                          <i className="ph ph-image text-3xl text-gray-200"></i>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 卡片底部操作列 */}
+                  {img.status === 'done' && (
+                    <div className="px-4 py-3 bg-gray-50 border-t border-gray-100 flex justify-end">
+                      <button 
+                        onClick={() => downloadImage(img.resultBase64, `alei_style_${img.id}.jpg`)}
+                        className="flex items-center text-sm font-semibold text-[#d17a45] hover:text-[#b86735] transition-colors"
+                      >
+                        <i className="ph ph-download-simple mr-1 text-lg"></i> 儲存圖片
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+
+          </div>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
