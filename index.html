@@ -5,15 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>阿雷 (A-Lei) 風格轉換器</title>
   
-  <!-- 載入 React, ReactDOM, Babel (用於在瀏覽器編譯 JSX) -->
   <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   
-  <!-- 載入 Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
   
-  <!-- 載入 Phosphor Icons (圖示庫) -->
   <script src="https://unpkg.com/@phosphor-icons/web"></script>
   
   <style>
@@ -88,18 +85,15 @@
 
       // 呼叫 Gemini API 進行風格轉換
       const processSingleImage = async (imageObj) => {
-        // ⚠️【重要修改說明】⚠️
-        // 程式碼目前鎖定為空字串，以供在此環境測試。
-        // 若要上傳至 GitHub Pages，您「必須」將下方的空字串替換為您自己申請的真實 API Key
-        // 範例：const apiKey = "AIzaSyAbCdEfGhIjKlMnOpQrStUvWxYz";
-        // 申請網址：https://aistudio.google.com/app/apikey
-        const apiKey = "AIzaSyCsa8u-pzzQMAMLIQPagyphAcqPKlDedhA"; 
+        // ⚠️【重要提醒】請將下方的字串替換為您的 API Key
+        const apiKey = "請在這裡填入您的API_KEY"; 
 
         try {
           const base64Data = await fileToBase64(imageObj.file);
           const mimeType = imageObj.file.type;
 
-          const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent?key=${apiKey.trim()}`;
+          // ⭐ 這裡將模型名稱修正為標準的 gemini-2.5-flash
+          const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey.trim()}`;
           
           const prompt = `
             Transform this photo into an illustration. Use a very specific Taiwanese indie illustration style (similar to A-Lei):
@@ -118,6 +112,7 @@
                 { inlineData: { mimeType: mimeType, data: base64Data } }
               ]
             }],
+            // 指定 API 回傳圖片格式
             generationConfig: { responseModalities: ["IMAGE"] }
           };
 
