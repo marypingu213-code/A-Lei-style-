@@ -99,7 +99,7 @@
           const base64Data = await fileToBase64(imageObj.file);
           const mimeType = imageObj.file.type;
 
-          const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image-preview:generateContent?key=${apiKey.trim()}`;
+          const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent?key=${apiKey.trim()}`;
           
           const prompt = `
             Transform this photo into an illustration. Use a very specific Taiwanese indie illustration style (similar to A-Lei):
